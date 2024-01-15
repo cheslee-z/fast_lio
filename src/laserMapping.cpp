@@ -56,7 +56,7 @@
 #include <tf/transform_datatypes.h>
 #include <tf/transform_broadcaster.h>
 #include <geometry_msgs/Vector3.h>
-#include <livox_ros_driver/CustomMsg.h>
+#include <livox_ros_driver2/CustomMsg.h>
 #include "preprocess.h"
 #include <ikd-Tree/ikd_Tree.h>
 
@@ -135,6 +135,7 @@ nav_msgs::Path path;
 nav_msgs::Odometry odomAftMapped;
 geometry_msgs::Quaternion geoQuat;
 geometry_msgs::PoseStamped msg_body_pose;
+geometry_msgs::PoseStamped local_pose;
 
 shared_ptr<Preprocess> p_pre(new Preprocess());
 shared_ptr<ImuProcess> p_imu(new ImuProcess());
@@ -298,7 +299,7 @@ void standard_pcl_cbk(const sensor_msgs::PointCloud2::ConstPtr &msg)
 
 double timediff_lidar_wrt_imu = 0.0;
 bool   timediff_set_flg = false;
-void livox_pcl_cbk(const livox_ros_driver::CustomMsg::ConstPtr &msg) 
+void livox_pcl_cbk(const livox_ros_driver2::CustomMsg::ConstPtr &msg) 
 {
     mtx_buffer.lock();
     double preprocess_start_time = omp_get_wtime();
@@ -581,6 +582,23 @@ void set_posestamp(T & out)
     
 }
 
+void publish_odometry_to_autopilot(const ros::Publisher & pubOdomToAutopilot)
+{
+    local_pose.header.frame_id = "world";
+    local_pose.header.stamp = ros::Time().now();
+    set_posestamp(local_pose);
+    pubOdomToAutopilot.publish(local_pose);
+
+    printf("time: %f, t: %f %f %f q: %f %f %f %f \n", local_pose.header.stamp.toSec(), 
+                                                      local_pose.pose.position.x, 
+                                                      local_pose.pose.position.y,
+                                                      local_pose.pose.position.z,
+                                                      local_pose.pose.orientation.w,
+                                                      local_pose.pose.orientation.x,
+                                                      local_pose.pose.orientation.y,
+                                                      local_pose.pose.orientation.z); 
+}
+
 void publish_odometry(const ros::Publisher & pubOdomAftMapped)
 {
     odomAftMapped.header.frame_id = "camera_init";
@@ -849,6 +867,8 @@ int main(int argc, char** argv)
             ("/Laser_map", 100000);
     ros::Publisher pubOdomAftMapped = nh.advertise<nav_msgs::Odometry> 
             ("/Odometry", 100000);
+    ros::Publisher pubOdomToAutopilot = nh.advertise<geometry_msgs::PoseStamped>
+            ("/mavros/vision_pose/pose", 10000);
     ros::Publisher pubPath          = nh.advertise<nav_msgs::Path> 
             ("/path", 100000);
 //------------------------------------------------------------------------------------------------------
@@ -963,6 +983,7 @@ int main(int argc, char** argv)
 
             /******* Publish odometry *******/
             publish_odometry(pubOdomAftMapped);
+            publish_odometry_to_autopilot(pubOdomToAutopilot);
 
             /*** add the feature points to map kdtree ***/
             t3 = omp_get_wtime();
